@@ -232,7 +232,7 @@ def model_engine(model, num):
     # selecting the required values for training
     y = y[:-num]
 
-    #splitting the data
+    # splitting the data
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=.2, random_state=7)
     # training the model
     model.fit(x_train, y_train)
@@ -241,15 +241,17 @@ def model_engine(model, num):
             \nMAE: {mean_absolute_error(y_test, preds)}')
     # predicting stock price based on the number of days
     forecast_pred = model.predict(x_forecast)
-    day = 1
-    for i in forecast_pred:
-        st.text(f'Day {day}: {i}')
-        day += 1
+    
+    # Extract the last forecasted value from forecast_pred (which is an array)
+    predicted_price = forecast_pred[-1]
 
-    # Determine recommendation based on predicted value
-    predicted_price = forecast_pred[-1]  # Last day forecasted price
+    # Get today's price
     todays_price = data['Close'].iloc[-1]
 
+    st.text(f"Predicted Price for the last day: {predicted_price}")
+    st.text(f"Today's Price: {todays_price}")
+
+    # Ensure we're comparing scalar values
     if predicted_price > todays_price:
         recommendation = "Buy"
     elif predicted_price < todays_price:
