@@ -1,305 +1,227 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from ta.volatility import BollingerBands
-from ta.trend import MACD, EMAIndicator, SMAIndicator
-from ta.momentum import RSIIndicator
-import datetime
-from datetime import date
+import numpy as np
+from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.neighbors import KNeighborsRegressor
-from xgboost import XGBRegressor
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import ExtraTreesRegressor
-from sklearn.metrics import r2_score, mean_absolute_error
 import plotly.graph_objects as go
-import numpy as np
-import random
-import time
 
-# Page config
+# Page configuration
 st.set_page_config(page_title="Stock Price Predictions", layout="wide")
+
+# Title and description
 st.title('Stock Price Predictions')
-st.sidebar.info('Welcome to the Stock Price Prediction App. Choose your options below')
-st.sidebar.info("Created and designed by [DEEKSHITH](https://www.linkedin.com/in/vikas-sharma005/)")
+st.sidebar.info('Welcome to the Stock Price Prediction App')
 
 # Initialize session state
 if 'data' not in st.session_state:
     st.session_state.data = None
 
-def main():
-    with st.spinner('Unlocking the future...'):
-        time.sleep(2)  # Reduced delay for better UX
-    option = st.sidebar.selectbox('Make a choice', ['Visualize', 'Recent Data', 'Predict'])
-    
-    # Get stock data first
-    get_stock_data()
-    
-    if st.session_state.data is not None:
-        if option == 'Visualize':
-            tech_indicators()
-        elif option == 'Recent Data':
-            dataframe()
-        else:
-            predict()
-    else:
-        st.warning("Please enter a valid stock symbol and date range to proceed.")
-
 @st.cache_data
-def download_data(symbol, start_date, end_date):
+def load_data(ticker, start_date, end_date):
+    """Load stock data from Yahoo Finance."""
     try:
-        df = yf.download(symbol, start=start_date, end=end_date, progress=False)
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
         if df.empty:
             return None
         return df
     except Exception as e:
-        st.error(f"Error downloading data: {e}")
         return None
 
-def get_stock_data():
-    symbol = st.sidebar.text_input('Enter a Stock Symbol', value='SPY')
-    symbol = symbol.upper()
+def calculate_technical_indicators(df):
+    """Calculate technical indicators."""
+    df = df.copy()
     
-    today = datetime.date.today()
-    duration = st.sidebar.number_input('Enter the duration (days)', value=3000, min_value=1)
-    before = today - datetime.timedelta(days=duration)
+    # Simple Moving Averages
+    df['SMA20'] = df['Close'].rolling(window=20).mean()
+    df['SMA50'] = df['Close'].rolling(window=50).mean()
     
-    start_date = st.sidebar.date_input('Start Date', value=before)
-    end_date = st.sidebar.date_input('End date', today)
+    # Relative Strength Index (RSI)
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
     
-    if st.sidebar.button('Send'):
-        if start_date < end_date:
-            st.sidebar.success(f'Start date: `{start_date}`\n\nEnd date: `{end_date}`')
-            data = download_data(symbol, start_date, end_date)
-            if data is not None:
-                st.session_state.data = data
-            else:
-                st.error("No data found for the specified symbol and date range.")
-        else:
-            st.sidebar.error('Error: End date must fall after start date')
+    return df
 
-def tech_indicators():
-    st.header('Technical Indicators')
-    option = st.radio('Choose a Technical Indicator to Visualize', 
-                     ['Close', 'BB', 'MACD', 'RSI', 'SMA', 'EMA'])
+def create_features(df):
+    """Create features for prediction."""
+    df = df.copy()
     
-    data = st.session_state.data
+    # Technical indicators
+    df['SMA20'] = df['Close'].rolling(window=20).mean()
+    df['RSI'] = df['RSI'].fillna(50)  # Fill RSI NaN values with neutral 50
     
-    # Bollinger Bands
-    bb_indicator = BollingerBands(data['Close'])
-    data['bb_h'] = bb_indicator.bollinger_hband()
-    data['bb_l'] = bb_indicator.bollinger_lband()
-    bb = data[['Close', 'bb_h', 'bb_l']].copy()
+    # Price changes
+    df['Price_Change'] = df['Close'].pct_change()
+    df['Price_Change'] = df['Price_Change'].fillna(0)
     
-    # MACD
-    macd = MACD(data['Close']).macd()
-    
-    # RSI
-    rsi = RSIIndicator(data['Close']).rsi()
-    
-    # SMA
-    sma = SMAIndicator(data['Close'], window=14).sma_indicator()
-    
-    # EMA
-    ema = EMAIndicator(data['Close']).ema_indicator()
+    return df
 
-    if option == 'Close':
-        st.write('Close Price')
-        st.line_chart(data['Close'])
-    elif option == 'BB':
-        st.write('Bollinger Bands')
-        st.line_chart(bb)
-    elif option == 'MACD':
-        st.write('Moving Average Convergence Divergence')
-        st.line_chart(macd)
-    elif option == 'RSI':
-        st.write('Relative Strength Indicator')
-        st.line_chart(rsi)
-    elif option == 'SMA':
-        st.write('Simple Moving Average')
-        st.line_chart(sma)
-    else:
-        st.write('Exponential Moving Average')
-        st.line_chart(ema)
-
-def dataframe():
-    st.header('Recent Data')
-    st.dataframe(st.session_state.data.tail(10))
-
-def predict():
-    model = st.radio('Choose a model', 
-                    ['LinearRegression', 'RandomForestRegressor', 
-                     'ExtraTreesRegressor', 'KNeighborsRegressor', 
-                     'XGBRegressor'])
-    num = st.number_input('How many days forecast?', value=5, min_value=1)
-    num = int(num)
+def train_model(df, forecast_days, model_type='rf'):
+    """Train the prediction model."""
+    # Create features
+    df = create_features(df)
     
-    if st.button('Predict'):
-        if model == 'LinearRegression':
-            engine = LinearRegression()
-        elif model == 'RandomForestRegressor':
-            engine = RandomForestRegressor(n_estimators=100)
-        elif model == 'ExtraTreesRegressor':
-            engine = ExtraTreesRegressor(n_estimators=100)
-        elif model == 'KNeighborsRegressor':
-            engine = KNeighborsRegressor(n_neighbors=5)
-        else:
-            engine = XGBRegressor(n_estimators=100)
-        
-        model_engine(engine, num)
-
-def sentiment_analysis(recommendation):
-    if recommendation == "Buy":
-        sentiment_values = {
-            'positive': random.randint(60, 80),
-            'negative': random.randint(10, 20)
-        }
-        sentiment_values['neutral'] = 100 - (sentiment_values['positive'] + sentiment_values['negative'])
-        messages = [
-            "This stock shows strong buying signals right now.",
-            "Market trends indicate potential growth ahead.",
-            "Technical indicators suggest a bullish outlook.",
-            "Consider adding this stock to your portfolio."
-        ]
-    elif recommendation == "Sell":
-        sentiment_values = {
-            'positive': random.randint(10, 20),
-            'negative': random.randint(60, 80)
-        }
-        sentiment_values['neutral'] = 100 - (sentiment_values['positive'] + sentiment_values['negative'])
-        messages = [
-            "Consider taking profits at current levels.",
-            "Technical indicators suggest a bearish trend.",
-            "Market conditions indicate potential decline.",
-            "It might be wise to reduce position size."
-        ]
-    else:
-        sentiment_values = {
-            'positive': random.randint(30, 40),
-            'negative': random.randint(20, 30)
-        }
-        sentiment_values['neutral'] = 100 - (sentiment_values['positive'] + sentiment_values['negative'])
-        messages = [
-            "The market shows neutral signals.",
-            "Consider maintaining current position.",
-            "No strong directional indicators present.",
-            "Watch for clearer signals before acting."
-        ]
-
-    # Create sentiment pie chart
-    fig = go.Figure(data=[go.Pie(
-        labels=['Positive', 'Negative', 'Neutral'],
-        values=[sentiment_values['positive'], 
-                sentiment_values['negative'], 
-                sentiment_values['neutral']],
-        hole=0.3
-    )])
+    # Prepare features
+    features = ['Close', 'SMA20', 'RSI', 'Price_Change']
+    X = df[features].dropna()
     
-    fig.update_traces(textinfo='percent', pull=[0.1, 0.1, 0.1])
-    st.plotly_chart(fig)
-
-    st.subheader("Market Sentiment")
-    st.write(random.choice(messages))
+    # Create target (future price changes)
+    y = df['Close'].shift(-forecast_days).dropna()
     
-    # Recommendation styling
-    color = {
-        "Buy": "green",
-        "Sell": "red",
-        "Hold": "orange"
-    }[recommendation]
-    
-    st.markdown(f"""
-        <style>
-            .recommendation {{
-                color: {color};
-                font-size: 24px;
-                font-weight: bold;
-                text-align: center;
-                padding: 20px;
-                border: 2px solid {color};
-                border-radius: 10px;
-                margin: 20px 0;
-            }}
-        </style>
-        <div class="recommendation">
-            Recommendation: {recommendation}
-        </div>
-    """, unsafe_allow_html=True)
-
-def model_engine(model, forecast_days):
-    data = st.session_state.data
-    scaler = StandardScaler()
-    
-    # Prepare the data
-    df = data[['Close']].copy()
-    df['Target'] = df['Close'].shift(-forecast_days)
-    
-    # Create features (you can add more features here)
-    df['SMA_20'] = SMAIndicator(data['Close'], window=20).sma_indicator()
-    df['RSI'] = RSIIndicator(data['Close']).rsi()
-    
-    # Drop rows with NaN values
-    df = df.dropna()
-    
-    # Prepare features and target
-    features = ['Close', 'SMA_20', 'RSI']
-    X = df[features]
-    y = df['Target']
-    
-    # Scale the features
-    X_scaled = scaler.fit_transform(X)
+    # Align X and y
+    X = X.iloc[:-forecast_days]
     
     # Split the data
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled[:-forecast_days], 
-        y[:-forecast_days], 
-        test_size=0.2, 
-        random_state=42
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Scale the features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Select and train model
+    if model_type == 'rf':
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+    else:
+        model = LinearRegression()
+    
+    model.fit(X_train_scaled, y_train)
+    
+    # Prepare forecast data
+    forecast_data = X.iloc[-forecast_days:]
+    forecast_data_scaled = scaler.transform(forecast_data)
+    
+    # Make predictions
+    predictions = model.predict(forecast_data_scaled)
+    
+    return predictions
+
+def plot_stock_data(df):
+    """Plot stock price chart."""
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['Close'],
+        name='Close Price',
+        line=dict(color='blue')
+    ))
+    
+    fig.update_layout(
+        title='Stock Price History',
+        xaxis_title='Date',
+        yaxis_title='Price',
+        template='plotly_white'
     )
     
-    # Train the model
-    model.fit(X_train, y_train)
+    st.plotly_chart(fig)
+
+def main():
+    # Sidebar inputs
+    st.sidebar.header('Input Parameters')
     
-    # Make predictions on test set
-    test_predictions = model.predict(X_test)
+    # Stock symbol input
+    symbol = st.sidebar.text_input('Enter Stock Symbol (e.g., AAPL)', 'AAPL').upper()
     
-    # Calculate metrics
-    r2 = r2_score(y_test, test_predictions)
-    mae = mean_absolute_error(y_test, test_predictions)
+    # Date range selection
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365)
     
-    st.subheader("Model Performance")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("R² Score", f"{r2:.4f}")
-    with col2:
-        st.metric("Mean Absolute Error", f"{mae:.4f}")
+    start_date = st.sidebar.date_input('Start Date', start_date)
+    end_date = st.sidebar.date_input('End Date', end_date)
     
-    # Forecast future prices
-    forecast_features = X_scaled[-forecast_days:]
-    forecast_prices = model.predict(forecast_features)
+    # Load data when user clicks
+    if st.sidebar.button('Load Data'):
+        if start_date < end_date:
+            with st.spinner('Loading data...'):
+                df = load_data(symbol, start_date, end_date)
+                if df is not None:
+                    st.session_state.data = df
+                    st.success('Data loaded successfully!')
+                else:
+                    st.error('Error loading data. Please check the stock symbol and try again.')
+        else:
+            st.error('Error: End date must be after start date.')
     
-    # Display forecasts
-    st.subheader(f"Price Forecasts for Next {forecast_days} Days")
-    forecast_df = pd.DataFrame({
-        'Day': range(1, forecast_days + 1),
-        'Predicted Price': forecast_prices
-    })
-    st.dataframe(forecast_df)
-    
-    # Determine recommendation
-    last_price = data['Close'].iloc[-1]
-    avg_forecast = np.mean(forecast_prices)
-    
-    if avg_forecast > last_price * 1.02:  # 2% threshold
-        recommendation = "Buy"
-    elif avg_forecast < last_price * 0.98:
-        recommendation = "Sell"
-    else:
-        recommendation = "Hold"
+    # Main content
+    if st.session_state.data is not None:
+        data = st.session_state.data
         
-    sentiment_analysis(recommendation)
+        # Display stock price chart
+        plot_stock_data(data)
+        
+        # Prediction section
+        st.header('Price Prediction')
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            model_type = st.radio('Select Model', ['Random Forest', 'Linear Regression'])
+        with col2:
+            forecast_days = st.number_input('Forecast Days', min_value=1, max_value=30, value=5)
+        
+        if st.button('Generate Forecast'):
+            with st.spinner('Generating forecast...'):
+                # Generate predictions
+                predictions = train_model(
+                    data,
+                    forecast_days,
+                    'rf' if model_type == 'Random Forest' else 'lr'
+                )
+                
+                # Create forecast dates
+                last_date = data.index[-1]
+                forecast_dates = pd.date_range(
+                    start=last_date + timedelta(days=1),
+                    periods=forecast_days,
+                    freq='B'  # Business days
+                )
+                
+                # Display forecast results
+                st.subheader('Price Forecast')
+                forecast_df = pd.DataFrame({
+                    'Date': forecast_dates,
+                    'Predicted Price': predictions
+                })
+                forecast_df.set_index('Date', inplace=True)
+                st.dataframe(forecast_df)
+                
+                # Plot forecast
+                fig = go.Figure()
+                
+                # Historical prices
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data['Close'],
+                    name='Historical Price',
+                    line=dict(color='blue')
+                ))
+                
+                # Forecast
+                fig.add_trace(go.Scatter(
+                    x=forecast_dates,
+                    y=predictions,
+                    name='Forecast',
+                    line=dict(color='red', dash='dash')
+                ))
+                
+                fig.update_layout(
+                    title='Stock Price Forecast',
+                    xaxis_title='Date',
+                    yaxis_title='Price',
+                    template='plotly_white'
+                )
+                
+                st.plotly_chart(fig)
+        
+        # Recent data
+        st.header('Recent Data')
+        st.dataframe(data.tail())
 
 if __name__ == "__main__":
     main()
