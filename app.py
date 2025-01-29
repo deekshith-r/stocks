@@ -31,34 +31,26 @@ def load_data(ticker, start_date, end_date):
     except Exception as e:
         return None
 
-def calculate_technical_indicators(df):
-    """Calculate technical indicators."""
-    df = df.copy()
+def calculate_rsi(data, periods=14):
+    """Calculate RSI."""
+    delta = data['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
     
-    # Simple Moving Averages
-    df['SMA20'] = df['Close'].rolling(window=20).mean()
-    df['SMA50'] = df['Close'].rolling(window=50).mean()
-    
-    # Relative Strength Index (RSI)
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    return df
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50)  # Fill NaN values with neutral 50
 
 def create_features(df):
     """Create features for prediction."""
     df = df.copy()
     
     # Technical indicators
-    df['SMA20'] = df['Close'].rolling(window=20).mean()
-    df['RSI'] = df['RSI'].fillna(50)  # Fill RSI NaN values with neutral 50
+    df['SMA20'] = df['Close'].rolling(window=20).mean().fillna(method='bfill')
+    df['RSI'] = calculate_rsi(df)
     
     # Price changes
-    df['Price_Change'] = df['Close'].pct_change()
-    df['Price_Change'] = df['Price_Change'].fillna(0)
+    df['Price_Change'] = df['Close'].pct_change().fillna(0)
     
     return df
 
@@ -69,13 +61,14 @@ def train_model(df, forecast_days, model_type='rf'):
     
     # Prepare features
     features = ['Close', 'SMA20', 'RSI', 'Price_Change']
-    X = df[features].dropna()
+    X = df[features].copy()
     
     # Create target (future price changes)
-    y = df['Close'].shift(-forecast_days).dropna()
+    y = df['Close'].shift(-forecast_days)
     
-    # Align X and y
+    # Remove NaN values
     X = X.iloc[:-forecast_days]
+    y = y.iloc[:-forecast_days]
     
     # Split the data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -94,7 +87,7 @@ def train_model(df, forecast_days, model_type='rf'):
     model.fit(X_train_scaled, y_train)
     
     # Prepare forecast data
-    forecast_data = X.iloc[-forecast_days:]
+    forecast_data = df[features].iloc[-forecast_days:].copy()
     forecast_data_scaled = scaler.transform(forecast_data)
     
     # Make predictions
@@ -121,6 +114,22 @@ def plot_stock_data(df):
     )
     
     st.plotly_chart(fig)
+
+def get_recommendation(current_price, predicted_prices):
+    """Generate trading recommendation."""
+    avg_predicted = np.mean(predicted_prices)
+    percent_change = ((avg_predicted - current_price) / current_price) * 100
+    
+    if percent_change > 2:
+        return "Strong Buy", "green"
+    elif percent_change > 0:
+        return "Buy", "lightgreen"
+    elif percent_change < -2:
+        return "Strong Sell", "red"
+    elif percent_change < 0:
+        return "Sell", "pink"
+    else:
+        return "Hold", "gray"
 
 def main():
     # Sidebar inputs
@@ -156,6 +165,17 @@ def main():
         # Display stock price chart
         plot_stock_data(data)
         
+        # Summary metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Current Price", f"${data['Close'].iloc[-1]:.2f}")
+        with col2:
+            price_change = data['Close'].iloc[-1] - data['Close'].iloc[-2]
+            st.metric("Daily Change", f"${price_change:.2f}")
+        with col3:
+            volume = data['Volume'].iloc[-1]
+            st.metric("Volume", f"{volume:,.0f}")
+        
         # Prediction section
         st.header('Price Prediction')
         
@@ -190,6 +210,27 @@ def main():
                 })
                 forecast_df.set_index('Date', inplace=True)
                 st.dataframe(forecast_df)
+                
+                # Get recommendation
+                recommendation, color = get_recommendation(
+                    data['Close'].iloc[-1],
+                    predictions
+                )
+                
+                # Display recommendation
+                st.markdown(f"""
+                    <div style='
+                        padding: 20px;
+                        border-radius: 10px;
+                        background-color: {color};
+                        text-align: center;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 24px;
+                    '>
+                        Recommendation: {recommendation}
+                    </div>
+                """, unsafe_allow_html=True)
                 
                 # Plot forecast
                 fig = go.Figure()
