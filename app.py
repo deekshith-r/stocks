@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="StockXpert", layout="wide")
 
 # Title and description
-st.title('StockXpert')
+st.title('TradeSense')
 st.sidebar.info('Welcome to the Stock Price Prediction App')
 
 # Initialize session state
