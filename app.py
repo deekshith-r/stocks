@@ -14,7 +14,7 @@ st.set_page_config(page_title="StockXpert", layout="wide")
 
 # Title and description
 st.title('TradeSense')
-st.sidebar.info('Welcome to the Stock Price Prediction App')
+st.sidebar.info('TradeSense-Levaraging Deep Learning For Stock Prediction')
 
 # Initialize session state
 if 'data' not in st.session_state:
