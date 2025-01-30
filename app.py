@@ -90,12 +90,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# App title
-st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI</h1>", unsafe_allow_html=True)
-
 # Session state initialization
 if 'data' not in st.session_state:
     st.session_state.data = None
+if 'company_name' not in st.session_state:
+    st.session_state.company_name = ""
 
 @st.cache_data
 def load_data(ticker, start_date, end_date):
@@ -147,7 +146,6 @@ def plot_interactive_chart(historical, forecast=None):
     """Plot interactive chart with historical and forecast data."""
     fig = go.Figure()
     
-    # Historical data
     fig.add_trace(go.Candlestick(
         x=historical.index,
         open=historical['Open'],
@@ -157,7 +155,6 @@ def plot_interactive_chart(historical, forecast=None):
         name='Historical'
     ))
     
-    # Forecast data
     if forecast is not None:
         fig.add_trace(go.Scatter(
             x=forecast.index,
@@ -210,6 +207,12 @@ with st.sidebar:
             df = load_data(symbol, start_date, end_date)
             if df is not None:
                 st.session_state.data = df
+                try:
+                    ticker_info = yf.Ticker(symbol).info
+                    company_name = ticker_info.get('longName', symbol)
+                    st.session_state.company_name = f"{company_name} ({symbol})"
+                except:
+                    st.session_state.company_name = f"({symbol})"
                 st.success("Data loaded successfully!")
             else:
                 st.error("Failed to load data. Check symbol and dates.")
@@ -218,6 +221,10 @@ with st.sidebar:
 if st.session_state.data is not None:
     df = st.session_state.data
     
+    # Dynamic title with company name
+    st.markdown(f"<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI - {st.session_state.company_name}</h1>", 
+                unsafe_allow_html=True)
+
     # Metrics row
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -263,15 +270,15 @@ if st.session_state.data is not None:
     # Interactive chart
     plot_interactive_chart(df)
 
-    # Recent Historical Data Table
+    # Recent Market Data Table
     st.subheader("📊 Recent Market Data")
     recent_data = df[['Open', 'High', 'Low', 'Close', 'Volume']].tail(5).reset_index()
-    recent_data.insert(0, 'Day', range(1, 6))
-    recent_data.rename(columns={'index': 'Date'}, inplace=True)
+    recent_data.insert(0, 'SL No', range(1, 6))
+    recent_data.rename(columns={'Date': 'Trade Date'}, inplace=True)
     
     st.dataframe(
         recent_data.style.format({
-            'Date': lambda x: x.strftime('%Y-%m-%d'),
+            'Trade Date': lambda x: x.strftime('%Y-%m-%d'),
             'Open': '${:.2f}',
             'High': '${:.2f}',
             'Low': '${:.2f}',
@@ -333,12 +340,12 @@ if st.session_state.data is not None:
             # Predicted Prices Table
             st.subheader("📈 Predicted Prices")
             forecast_display = forecast_df.reset_index()
-            forecast_display.insert(0, 'Day', range(1, len(forecast_df)+1))
-            forecast_display.columns = ['Day', 'Date', 'Predicted Price']
+            forecast_display.insert(0, 'SL No', range(1, len(forecast_df)+1))
+            forecast_display.columns = ['SL No', 'Prediction Date', 'Predicted Price']
             
             st.dataframe(
                 forecast_display.style.format({
-                    'Date': lambda x: x.strftime('%Y-%m-%d'),
+                    'Prediction Date': lambda x: x.strftime('%Y-%m-%d'),
                     'Predicted Price': '${:.2f}'
                 }).hide(axis='index'),
                 use_container_width=True
@@ -367,3 +374,5 @@ else:
         <p>Enter a stock symbol and date range to begin analysis</p>
     </div>
     """, unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI</h1>", 
+                unsafe_allow_html=True)
