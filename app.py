@@ -10,8 +10,6 @@ from sklearn.ensemble import RandomForestRegressor
 import plotly.graph_objects as go
 from ta import add_all_ta_features
 import time
-import requests
-from io import StringIO
 
 # Page configuration
 st.set_page_config(
@@ -92,35 +90,104 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Ticker data URL (using a sample dataset)
-TICKER_DATA_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
-
-@st.cache_data
-def load_ticker_data():
-    """Load supported tickers data"""
-    try:
-        response = requests.get(TICKER_DATA_URL)
-        csv_data = StringIO(response.text)
-        df = pd.read_csv(csv_data)
-        return df[['Symbol', 'Name', 'Sector']]
-    except:
-        return pd.DataFrame(columns=['Symbol', 'Name', 'Sector'])
-
 # Session state initialization
 if 'data' not in st.session_state:
     st.session_state.data = None
 if 'company_name' not in st.session_state:
     st.session_state.company_name = ""
-if 'show_ticker_search' not in st.session_state:
-    st.session_state.show_ticker_search = False
 
-# Helper functions (keep load_data, calculate_technical_indicators, 
-# create_features, train_model, plot_interactive_chart, 
-# get_recommendation same as before)
+@st.cache_data
+def load_data(ticker, start_date, end_date):
+    """Load stock data from Yahoo Finance."""
+    try:
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        return df if not df.empty else None
+    except:
+        return None
 
-# Main App Title
-st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI</h1>", 
-            unsafe_allow_html=True)
+def calculate_technical_indicators(df):
+    """Calculate technical indicators."""
+    df = df.copy()
+    df = add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+    return df
+
+def create_features(df):
+    """Create features for prediction."""
+    df = calculate_technical_indicators(df)
+    df['Price_Change'] = df['Close'].pct_change().fillna(0)
+    return df
+
+def train_model(df, forecast_days, model_type='rf'):
+    """Train prediction model."""
+    df = create_features(df)
+    features = ['Close', 'volume_adi', 'volatility_bbm', 'trend_macd', 'momentum_rsi', 'Price_Change']
+    
+    X = df[features].copy()
+    y = df['Close'].shift(-forecast_days)
+    valid_indices = y.dropna().index
+    X = X.loc[valid_indices]
+    y = y.loc[valid_indices]
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    model = RandomForestRegressor(n_estimators=200, random_state=42) if model_type == 'rf' else LinearRegression()
+    model.fit(X_train_scaled, y_train)
+    
+    forecast_data = df[features].iloc[-forecast_days:].copy()
+    forecast_scaled = scaler.transform(forecast_data)
+    predictions = model.predict(forecast_scaled)
+    
+    return predictions
+
+def plot_interactive_chart(historical, forecast=None):
+    """Plot interactive chart with historical and forecast data."""
+    fig = go.Figure()
+    
+    fig.add_trace(go.Candlestick(
+        x=historical.index,
+        open=historical['Open'],
+        high=historical['High'],
+        low=historical['Low'],
+        close=historical['Close'],
+        name='Historical'
+    ))
+    
+    if forecast is not None:
+        fig.add_trace(go.Scatter(
+            x=forecast.index,
+            y=forecast['Prediction'],
+            name='Forecast',
+            line=dict(color='#3b82f6', width=2, dash='dot'),
+            marker=dict(size=8)
+        ))
+    
+    fig.update_layout(
+        template='plotly_dark',
+        height=600,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis_rangeslider_visible=False,
+        hovermode='x unified'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+def get_recommendation(current_price, predictions):
+    """Generate trading recommendation with animations."""
+    avg_predicted = np.mean(predictions)
+    change = ((avg_predicted - current_price) / current_price) * 100
+    
+    if change > 5:
+        return "🚀 Strong Buy", "#22c55e", "rocket"
+    elif change > 0:
+        return "📈 Buy", "#3b82f6", "chart"
+    elif change < -5:
+        return "🔥 Strong Sell", "#ef4444", "fire"
+    elif change < 0:
+        return "📉 Sell", "#f59e0b", "warning"
+    else:
+        return "🤝 Hold", "#64748b", "handshake"
 
 # Sidebar controls
 with st.sidebar:
@@ -155,7 +222,7 @@ if st.session_state.data is not None:
     df = st.session_state.data
     
     # Dynamic title with company name
-    st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>📊 Analyzing: {st.session_state.company_name}</h2>", 
+    st.markdown(f"<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI - {st.session_state.company_name}</h1>", 
                 unsafe_allow_html=True)
 
     # Metrics row
@@ -296,44 +363,6 @@ if st.session_state.data is not None:
             with col3:
                 st.metric("Model Type", model_type)
 
-# Ticker Lookup Section (Collapsible)
-with st.expander("🔍 Don't know the ticker symbol? Search here"):
-    st.markdown("### Ticker Symbol Lookup")
-    search_query = st.text_input("Search companies (name or symbol):", "")
-    
-    if st.button("Load Supported Tickers"):
-        with st.spinner("Loading ticker database..."):
-            ticker_data = load_ticker_data()
-            
-            if not ticker_data.empty:
-                if search_query:
-                    search = search_query.lower()
-                    filtered_data = ticker_data[
-                        ticker_data['Name'].str.lower().str.contains(search) |
-                        ticker_data['Symbol'].str.lower().str.contains(search)
-                    ]
-                else:
-                    filtered_data = ticker_data
-
-                st.markdown(f"**Found {len(filtered_data)} companies**")
-                
-                st.dataframe(
-                    filtered_data.style.format({
-                        'Symbol': '{}',
-                        'Name': '{}',
-                        'Sector': '{}'
-                    }).hide(axis='index'),
-                    use_container_width=True,
-                    height=400,
-                    column_config={
-                        "Symbol": "Ticker Symbol",
-                        "Name": "Company Name",
-                        "Sector": "Industry Sector"
-                    }
-                )
-            else:
-                st.error("Failed to load ticker data. Please try again later.")
-
 # Initial state message
 else:
     st.markdown("""
@@ -347,3 +376,5 @@ else:
         <p>Enter a stock symbol and date range to begin analysis</p>
     </div>
     """, unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI</h1>", 
+                unsafe_allow_html=True)
