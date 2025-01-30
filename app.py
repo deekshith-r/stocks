@@ -12,56 +12,88 @@ from ta import add_all_ta_features
 import time
 
 # Page configuration
-st.set_page_config(page_title="StockXpert", layout="wide", page_icon="📈")
-
-# Custom CSS for animations and styling
-st.markdown(
-    """
-    <style>
-    @keyframes gradientBackground {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    .stApp {
-        background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
-        background-size: 400% 400%;
-        animation: gradientBackground 15s ease infinite;
-    }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        border-radius: 12px;
-        padding: 10px 24px;
-        font-size: 16px;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        background-color: #45a049;
-        transform: scale(1.05);
-    }
-    .stHeader {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #ffffff;
-        text-align: center;
-    }
-    .stMetric {
-        background-color: rgba(255, 255, 255, 0.8);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+st.set_page_config(
+    page_title="StockSense AI",
+    layout="wide",
+    page_icon="📊",
+    initial_sidebar_state="expanded"
 )
 
-# Title and description
-st.markdown('<p class="stHeader">📈 TradeSense: AI-Powered Stock Predictions</p>', unsafe_allow_html=True)
-st.sidebar.markdown("### 🛠️ Input Parameters")
+# Custom CSS with enhanced animations and responsive design
+st.markdown("""
+<style>
+:root {
+    --primary: #6366f1;
+    --secondary: #3b82f6;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --dark: #1e293b;
+    --light: #f8fafc;
+}
 
-# Initialize session state
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.stApp {
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    color: var(--light);
+}
+
+.stButton>button {
+    background: var(--primary);
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    width: 100%;
+}
+
+.stButton>button:hover {
+    background: var(--secondary);
+    transform: scale(1.05);
+}
+
+.stMetric {
+    background: rgba(30, 41, 59, 0.7);
+    border-radius: 12px;
+    padding: 1.5rem;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: fadeIn 0.6s ease;
+}
+
+.stMetric h3 {
+    color: var(--primary);
+    font-size: 2rem;
+    margin: 0.5rem 0;
+}
+
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    color: var(--light) !important;
+    animation: fadeIn 0.8s ease;
+}
+
+.stDataFrame {
+    background: rgba(30, 41, 59, 0.7) !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+@media (max-width: 768px) {
+    .stMetric h3 {
+        font-size: 1.5rem;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# App title
+st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>📈 StockSense AI</h1>", unsafe_allow_html=True)
+
+# Session state initialization
 if 'data' not in st.session_state:
     st.session_state.data = None
 
@@ -70,10 +102,8 @@ def load_data(ticker, start_date, end_date):
     """Load stock data from Yahoo Finance."""
     try:
         df = yf.download(ticker, start=start_date, end=end_date, progress=False)
-        if df.empty:
-            return None
-        return df
-    except Exception as e:
+        return df if not df.empty else None
+    except:
         return None
 
 def calculate_technical_indicators(df):
@@ -84,158 +114,224 @@ def calculate_technical_indicators(df):
 
 def create_features(df):
     """Create features for prediction."""
-    df = df.copy()
     df = calculate_technical_indicators(df)
     df['Price_Change'] = df['Close'].pct_change().fillna(0)
     return df
 
 def train_model(df, forecast_days, model_type='rf'):
-    """Train the prediction model."""
+    """Train prediction model."""
     df = create_features(df)
     features = ['Close', 'volume_adi', 'volatility_bbm', 'trend_macd', 'momentum_rsi', 'Price_Change']
+    
     X = df[features].copy()
     y = df['Close'].shift(-forecast_days)
-    X = X.iloc[:-forecast_days]
-    y = y.iloc[:-forecast_days]
+    valid_indices = y.dropna().index
+    X = X.loc[valid_indices]
+    y = y.loc[valid_indices]
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    if model_type == 'rf':
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-    else:
-        model = LinearRegression()
+    
+    model = RandomForestRegressor(n_estimators=200, random_state=42) if model_type == 'rf' else LinearRegression()
     model.fit(X_train_scaled, y_train)
+    
     forecast_data = df[features].iloc[-forecast_days:].copy()
-    forecast_data_scaled = scaler.transform(forecast_data)
-    predictions = model.predict(forecast_data_scaled)
+    forecast_scaled = scaler.transform(forecast_data)
+    predictions = model.predict(forecast_scaled)
+    
     return predictions
 
-def plot_candlestick(df):
-    """Plot interactive candlestick chart."""
-    fig = go.Figure(data=[go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Candlestick'
-    )])
+def plot_interactive_chart(historical, forecast=None):
+    """Plot interactive chart with historical and forecast data."""
+    fig = go.Figure()
+    
+    # Historical data
+    fig.add_trace(go.Candlestick(
+        x=historical.index,
+        open=historical['Open'],
+        high=historical['High'],
+        low=historical['Low'],
+        close=historical['Close'],
+        name='Historical'
+    ))
+    
+    # Forecast data
+    if forecast is not None:
+        fig.add_trace(go.Scatter(
+            x=forecast.index,
+            y=forecast['Prediction'],
+            name='Forecast',
+            line=dict(color='#3b82f6', width=2, dash='dot'),
+            marker=dict(size=8)
+        ))
+    
     fig.update_layout(
-        title='Stock Price History (Candlestick Chart)',
-        xaxis_title='Date',
-        yaxis_title='Price',
         template='plotly_dark',
+        height=600,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis_rangeslider_visible=False,
         hovermode='x unified'
     )
     st.plotly_chart(fig, use_container_width=True)
 
-def get_recommendation(current_price, predicted_prices):
-    """Generate trading recommendation with emojis."""
-    avg_predicted = np.mean(predicted_prices)
-    percent_change = ((avg_predicted - current_price) / current_price) * 100
-    if percent_change > 2:
-        return "🚀 Strong Buy", "green", "The stock is expected to rise significantly. A great time to invest!"
-    elif percent_change > 0:
-        return "📈 Buy", "lightgreen", "The stock is expected to rise. Consider buying."
-    elif percent_change < -2:
-        return "🔥 Strong Sell", "red", "The stock is expected to drop significantly. Consider selling."
-    elif percent_change < 0:
-        return "📉 Sell", "pink", "The stock is expected to drop. Consider selling."
+def get_recommendation(current_price, predictions):
+    """Generate trading recommendation with animations."""
+    avg_predicted = np.mean(predictions)
+    change = ((avg_predicted - current_price) / current_price) * 100
+    
+    if change > 5:
+        return "🚀 Strong Buy", "#22c55e", "rocket"
+    elif change > 0:
+        return "📈 Buy", "#3b82f6", "chart"
+    elif change < -5:
+        return "🔥 Strong Sell", "#ef4444", "fire"
+    elif change < 0:
+        return "📉 Sell", "#f59e0b", "warning"
     else:
-        return "🤝 Hold", "gray", "The stock is expected to remain stable. Hold your position."
+        return "🤝 Hold", "#64748b", "handshake"
 
-def main():
-    # Sidebar inputs
-    symbol = st.sidebar.text_input('Enter Stock Symbol (e.g., AAPL)', 'AAPL').upper()
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=365)
-    start_date = st.sidebar.date_input('Start Date', start_date)
-    end_date = st.sidebar.date_input('End Date', end_date)
+# Sidebar controls
+with st.sidebar:
+    st.header("⚙️ Controls")
+    symbol = st.text_input("Stock Symbol", "AAPL").upper()
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
+    with col2:
+        end_date = st.date_input("End Date", datetime.now())
+    
+    forecast_days = st.number_input("Forecast Days", min_value=1, max_value=365, value=7, step=1)
+    model_type = st.radio("Model Type", ["Random Forest", "Linear Regression"])
+    
+    if st.button("Analyze Stock"):
+        with st.spinner("Crunching numbers..."):
+            df = load_data(symbol, start_date, end_date)
+            if df is not None:
+                st.session_state.data = df
+                st.success("Data loaded successfully!")
+            else:
+                st.error("Failed to load data. Check symbol and dates.")
 
-    # Load data
-    if st.sidebar.button('Load Data'):
-        if start_date < end_date:
-            with st.spinner('Loading data...'):
-                progress_bar = st.progress(0)
-                for i in range(100):
-                    time.sleep(0.01)
-                    progress_bar.progress(i + 1)
-                df = load_data(symbol, start_date, end_date)
-                if df is not None:
-                    st.session_state.data = df
-                    st.success('✅ Data loaded successfully!')
-                else:
-                    st.error('❌ Error loading data. Please check the stock symbol and try again.')
-        else:
-            st.error('❌ Error: End date must be after start date.')
+# Main content
+if st.session_state.data is not None:
+    df = st.session_state.data
+    
+    # Metrics row
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("""
+        <div class="stMetric">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.5rem;">💰</span>
+                <div>
+                    <div>Current Price</div>
+                    <h3>${:.2f}</h3>
+                </div>
+            </div>
+        </div>
+        """.format(df['Close'].iloc[-1]), unsafe_allow_html=True)
+    
+    with col2:
+        change = df['Close'].iloc[-1] - df['Close'].iloc[-2]
+        st.markdown("""
+        <div class="stMetric">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.5rem;">📅</span>
+                <div>
+                    <div>24h Change</div>
+                    <h3>${:.2f}</h3>
+                </div>
+            </div>
+        </div>
+        """.format(change), unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="stMetric">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.5rem;">📊</span>
+                <div>
+                    <div>Volume</div>
+                    <h3>{:,.0f}</h3>
+                </div>
+            </div>
+        </div>
+        """.format(df['Volume'].iloc[-1]), unsafe_allow_html=True)
 
-    # Main content
-    if st.session_state.data is not None:
-        data = st.session_state.data
+    # Interactive chart
+    plot_interactive_chart(df)
 
-        # Display candlestick chart
-        plot_candlestick(data)
-
-        # Summary metrics
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown('<div class="stMetric">📊 Current Price<br><h3>${:.2f}</h3></div>'.format(data['Close'].iloc[-1]), unsafe_allow_html=True)
-        with col2:
-            price_change = data['Close'].iloc[-1] - data['Close'].iloc[-2]
-            st.markdown('<div class="stMetric">📈 Daily Change<br><h3>${:.2f}</h3></div>'.format(price_change), unsafe_allow_html=True)
-        with col3:
-            volume = data['Volume'].iloc[-1]
-            st.markdown('<div class="stMetric">📦 Volume<br><h3>{:,.0f}</h3></div>'.format(volume), unsafe_allow_html=True)
-
-        # Prediction section
-        st.markdown('## 🔮 Price Prediction')
-        model_type = st.radio('Select Model', ['Random Forest', 'Linear Regression'])
-        forecast_days = st.slider('Forecast Days', 1, 30, 5)
-
-        if st.button('Generate Forecast'):
-            with st.spinner('Generating forecast...'):
-                progress_bar = st.progress(0)
-                for i in range(100):
-                    time.sleep(0.01)
-                    progress_bar.progress(i + 1)
-                predictions = train_model(data, forecast_days, 'rf' if model_type == 'Random Forest' else 'lr')
-                last_date = data.index[-1]
-                forecast_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_days, freq='B')
-                forecast_df = pd.DataFrame({'Date': forecast_dates, 'Predicted Price': predictions})
-                forecast_df.set_index('Date', inplace=True)
-                st.dataframe(forecast_df)
-
-                # Recommendation
-                recommendation, color, explanation = get_recommendation(data['Close'].iloc[-1], predictions)
-                st.markdown(
-                    f"""
-                    <div style='
-                        padding: 20px;
-                        border-radius: 12px;
-                        background-color: {color};
-                        text-align: center;
-                        color: white;
-                        font-weight: bold;
-                        font-size: 24px;
-                    '>
-                        🎯 Recommendation: {recommendation}<br>
-                        <span style='font-size: 16px;'>{explanation}</span>
+    # Generate predictions
+    if st.button("Generate Forecast"):
+        with st.spinner("Training AI model..."):
+            start_time = time.time()
+            predictions = train_model(
+                df, 
+                forecast_days,
+                'rf' if model_type == "Random Forest" else 'lr'
+            )
+            
+            # Create forecast dataframe
+            last_date = df.index[-1]
+            forecast_dates = pd.date_range(
+                start=last_date + timedelta(days=1),
+                periods=forecast_days,
+                freq='B'
+            )
+            forecast_df = pd.DataFrame({
+                'Date': forecast_dates,
+                'Prediction': predictions
+            }).set_index('Date')
+            
+            # Show results
+            st.subheader("📅 Forecast Results")
+            plot_interactive_chart(df, forecast_df)
+            
+            # Recommendation
+            current_price = df['Close'].iloc[-1]
+            rec_text, rec_color, rec_icon = get_recommendation(current_price, predictions)
+            
+            st.markdown(f"""
+            <div style='
+                background: {rec_color}20;
+                border-left: 4px solid {rec_color};
+                padding: 1.5rem;
+                border-radius: 8px;
+                margin: 1rem 0;
+                animation: fadeIn 0.6s ease;
+            '>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 2rem;">{rec_text.split()[0]}</span>
+                    <div>
+                        <h3 style="margin: 0;">{rec_text}</h3>
+                        <p style="margin: 0; opacity: 0.9;">Average predicted price: ${np.mean(predictions):.2f}</p>
                     </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Performance metrics
+            st.subheader("⚡ Performance Metrics")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Training Time", f"{time.time() - start_time:.2f}s")
+            with col2:
+                st.metric("Prediction Range", f"{forecast_days} days")
+            with col3:
+                st.metric("Model Type", model_type)
 
-                # Plot forecast
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Historical Price', line=dict(color='blue')))
-                fig.add_trace(go.Scatter(x=forecast_dates, y=predictions, name='Forecast', line=dict(color='red', dash='dash')))
-                fig.update_layout(title='Stock Price Forecast', xaxis_title='Date', yaxis_title='Price', template='plotly_dark')
-                st.plotly_chart(fig, use_container_width=True)
-
-        # Recent data
-        st.markdown('## 📅 Recent Data')
-        st.dataframe(data.tail())
-
-if __name__ == "__main__":
-    main()
+# Initial state message
+else:
+    st.markdown("""
+    <div style='
+        text-align: center;
+        padding: 4rem;
+        opacity: 0.8;
+        animation: fadeIn 1s ease;
+    '>
+        <h2>🔍 Analyze Any Stock</h2>
+        <p>Enter a stock symbol and date range to begin analysis</p>
+    </div>
+    """, unsafe_allow_html=True)
