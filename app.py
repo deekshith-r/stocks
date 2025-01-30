@@ -8,13 +8,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 import plotly.graph_objects as go
+import plotly.express as px
+from ta import add_all_ta_features
+from ta.utils import dropna
 
 # Page configuration
 st.set_page_config(page_title="StockXpert", layout="wide")
 
 # Title and description
 st.title('TradeSense')
-st.sidebar.info('TradeSense-Levaraging Deep Learning For Stock Prediction')
+st.sidebar.info('TradeSense - Leveraging Deep Learning For Stock Prediction')
 
 # Initialize session state
 if 'data' not in st.session_state:
@@ -31,23 +34,18 @@ def load_data(ticker, start_date, end_date):
     except Exception as e:
         return None
 
-def calculate_rsi(data, periods=14):
-    """Calculate RSI."""
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)  # Fill NaN values with neutral 50
+def calculate_technical_indicators(df):
+    """Calculate technical indicators."""
+    df = df.copy()
+    df = add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+    return df
 
 def create_features(df):
     """Create features for prediction."""
     df = df.copy()
     
     # Technical indicators
-    df['SMA20'] = df['Close'].rolling(window=20).mean().fillna(method='bfill')
-    df['RSI'] = calculate_rsi(df)
+    df = calculate_technical_indicators(df)
     
     # Price changes
     df['Price_Change'] = df['Close'].pct_change().fillna(0)
@@ -60,7 +58,7 @@ def train_model(df, forecast_days, model_type='rf'):
     df = create_features(df)
     
     # Prepare features
-    features = ['Close', 'SMA20', 'RSI', 'Price_Change']
+    features = ['Close', 'volume_adi', 'volatility_bbm', 'trend_macd', 'momentum_rsi', 'Price_Change']
     X = df[features].copy()
     
     # Create target (future price changes)
