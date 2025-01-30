@@ -263,6 +263,24 @@ if st.session_state.data is not None:
     # Interactive chart
     plot_interactive_chart(df)
 
+    # Recent Historical Data Table
+    st.subheader("📊 Recent Market Data")
+    recent_data = df[['Open', 'High', 'Low', 'Close', 'Volume']].tail(5).reset_index()
+    recent_data.insert(0, 'Day', range(1, 6))
+    recent_data.rename(columns={'index': 'Date'}, inplace=True)
+    
+    st.dataframe(
+        recent_data.style.format({
+            'Date': lambda x: x.strftime('%Y-%m-%d'),
+            'Open': '${:.2f}',
+            'High': '${:.2f}',
+            'Low': '${:.2f}',
+            'Close': '${:.2f}',
+            'Volume': '{:,.0f}'
+        }).hide(axis='index'),
+        use_container_width=True
+    )
+
     # Generate predictions
     if st.button("Generate Forecast"):
         with st.spinner("Training AI model..."):
@@ -315,28 +333,14 @@ if st.session_state.data is not None:
             # Predicted Prices Table
             st.subheader("📈 Predicted Prices")
             forecast_display = forecast_df.reset_index()
-            forecast_display.columns = ['Date', 'Predicted Price']
+            forecast_display.insert(0, 'Day', range(1, len(forecast_df)+1))
+            forecast_display.columns = ['Day', 'Date', 'Predicted Price']
+            
             st.dataframe(
                 forecast_display.style.format({
                     'Date': lambda x: x.strftime('%Y-%m-%d'),
-                    'Predicted Price': '{:.2f}'
-                }),
-                height=300,
-                use_container_width=True
-            )
-            
-            # Recent Historical Data Table
-            st.subheader("📊 Recent Historical Data")
-            recent_data = df[['Low', 'High', 'Close']].tail(5).reset_index()
-            recent_data.rename(columns={'index': 'Date'}, inplace=True)
-            st.dataframe(
-                recent_data.style.format({
-                    'Date': lambda x: x.strftime('%Y-%m-%d'),
-                    'Low': '{:.2f}',
-                    'High': '{:.2f}',
-                    'Close': '{:.2f}'
-                }),
-                height=300,
+                    'Predicted Price': '${:.2f}'
+                }).hide(axis='index'),
                 use_container_width=True
             )
             
