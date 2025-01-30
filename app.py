@@ -8,16 +8,58 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 import plotly.graph_objects as go
-import plotly.express as px
 from ta import add_all_ta_features
-from ta.utils import dropna
+import time
 
 # Page configuration
-st.set_page_config(page_title="StockXpert", layout="wide")
+st.set_page_config(page_title="StockXpert", layout="wide", page_icon="📈")
+
+# Custom CSS for animations and styling
+st.markdown(
+    """
+    <style>
+    @keyframes gradientBackground {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    .stApp {
+        background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+        background-size: 400% 400%;
+        animation: gradientBackground 15s ease infinite;
+    }
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 12px;
+        padding: 10px 24px;
+        font-size: 16px;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #45a049;
+        transform: scale(1.05);
+    }
+    .stHeader {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #ffffff;
+        text-align: center;
+    }
+    .stMetric {
+        background-color: rgba(255, 255, 255, 0.8);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Title and description
-st.title('TradeSense')
-st.sidebar.info('TradeSense - Leveraging Deep Learning For Stock Prediction')
+st.markdown('<p class="stHeader">📈 TradeSense: AI-Powered Stock Predictions</p>', unsafe_allow_html=True)
+st.sidebar.markdown("### 🛠️ Input Parameters")
 
 # Initialize session state
 if 'data' not in st.session_state:
@@ -43,223 +85,156 @@ def calculate_technical_indicators(df):
 def create_features(df):
     """Create features for prediction."""
     df = df.copy()
-    
-    # Technical indicators
     df = calculate_technical_indicators(df)
-    
-    # Price changes
     df['Price_Change'] = df['Close'].pct_change().fillna(0)
-    
     return df
 
 def train_model(df, forecast_days, model_type='rf'):
     """Train the prediction model."""
-    # Create features
     df = create_features(df)
-    
-    # Prepare features
     features = ['Close', 'volume_adi', 'volatility_bbm', 'trend_macd', 'momentum_rsi', 'Price_Change']
     X = df[features].copy()
-    
-    # Create target (future price changes)
     y = df['Close'].shift(-forecast_days)
-    
-    # Remove NaN values
     X = X.iloc[:-forecast_days]
     y = y.iloc[:-forecast_days]
-    
-    # Split the data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Scale the features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    
-    # Select and train model
     if model_type == 'rf':
         model = RandomForestRegressor(n_estimators=100, random_state=42)
     else:
         model = LinearRegression()
-    
     model.fit(X_train_scaled, y_train)
-    
-    # Prepare forecast data
     forecast_data = df[features].iloc[-forecast_days:].copy()
     forecast_data_scaled = scaler.transform(forecast_data)
-    
-    # Make predictions
     predictions = model.predict(forecast_data_scaled)
-    
     return predictions
 
-def plot_stock_data(df):
-    """Plot stock price chart."""
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
+def plot_candlestick(df):
+    """Plot interactive candlestick chart."""
+    fig = go.Figure(data=[go.Candlestick(
         x=df.index,
-        y=df['Close'],
-        name='Close Price',
-        line=dict(color='blue')
-    ))
-    
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name='Candlestick'
+    )])
     fig.update_layout(
-        title='Stock Price History',
+        title='Stock Price History (Candlestick Chart)',
         xaxis_title='Date',
         yaxis_title='Price',
-        template='plotly_white'
+        template='plotly_dark',
+        hovermode='x unified'
     )
-    
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 def get_recommendation(current_price, predicted_prices):
-    """Generate trading recommendation."""
+    """Generate trading recommendation with emojis."""
     avg_predicted = np.mean(predicted_prices)
     percent_change = ((avg_predicted - current_price) / current_price) * 100
-    
     if percent_change > 2:
-        return "Strong Buy", "green"
+        return "🚀 Strong Buy", "green", "The stock is expected to rise significantly. A great time to invest!"
     elif percent_change > 0:
-        return "Buy", "lightgreen"
+        return "📈 Buy", "lightgreen", "The stock is expected to rise. Consider buying."
     elif percent_change < -2:
-        return "Strong Sell", "red"
+        return "🔥 Strong Sell", "red", "The stock is expected to drop significantly. Consider selling."
     elif percent_change < 0:
-        return "Sell", "pink"
+        return "📉 Sell", "pink", "The stock is expected to drop. Consider selling."
     else:
-        return "Hold", "gray"
+        return "🤝 Hold", "gray", "The stock is expected to remain stable. Hold your position."
 
 def main():
     # Sidebar inputs
-    st.sidebar.header('Input Parameters')
-    
-    # Stock symbol input
     symbol = st.sidebar.text_input('Enter Stock Symbol (e.g., AAPL)', 'AAPL').upper()
-    
-    # Date range selection
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365)
-    
     start_date = st.sidebar.date_input('Start Date', start_date)
     end_date = st.sidebar.date_input('End Date', end_date)
-    
-    # Load data when user clicks
+
+    # Load data
     if st.sidebar.button('Load Data'):
         if start_date < end_date:
             with st.spinner('Loading data...'):
+                progress_bar = st.progress(0)
+                for i in range(100):
+                    time.sleep(0.01)
+                    progress_bar.progress(i + 1)
                 df = load_data(symbol, start_date, end_date)
                 if df is not None:
                     st.session_state.data = df
-                    st.success('Data loaded successfully!')
+                    st.success('✅ Data loaded successfully!')
                 else:
-                    st.error('Error loading data. Please check the stock symbol and try again.')
+                    st.error('❌ Error loading data. Please check the stock symbol and try again.')
         else:
-            st.error('Error: End date must be after start date.')
-    
+            st.error('❌ Error: End date must be after start date.')
+
     # Main content
     if st.session_state.data is not None:
         data = st.session_state.data
-        
-        # Display stock price chart
-        plot_stock_data(data)
-        
+
+        # Display candlestick chart
+        plot_candlestick(data)
+
         # Summary metrics
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Current Price", f"${data['Close'].iloc[-1]:.2f}")
+            st.markdown('<div class="stMetric">📊 Current Price<br><h3>${:.2f}</h3></div>'.format(data['Close'].iloc[-1]), unsafe_allow_html=True)
         with col2:
             price_change = data['Close'].iloc[-1] - data['Close'].iloc[-2]
-            st.metric("Daily Change", f"${price_change:.2f}")
+            st.markdown('<div class="stMetric">📈 Daily Change<br><h3>${:.2f}</h3></div>'.format(price_change), unsafe_allow_html=True)
         with col3:
             volume = data['Volume'].iloc[-1]
-            st.metric("Volume", f"{volume:,.0f}")
-        
+            st.markdown('<div class="stMetric">📦 Volume<br><h3>{:,.0f}</h3></div>'.format(volume), unsafe_allow_html=True)
+
         # Prediction section
-        st.header('Price Prediction')
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            model_type = st.radio('Select Model', ['Random Forest', 'Linear Regression'])
-        with col2:
-            forecast_days = st.number_input('Forecast Days', min_value=1, max_value=30, value=5)
-        
+        st.markdown('## 🔮 Price Prediction')
+        model_type = st.radio('Select Model', ['Random Forest', 'Linear Regression'])
+        forecast_days = st.slider('Forecast Days', 1, 30, 5)
+
         if st.button('Generate Forecast'):
             with st.spinner('Generating forecast...'):
-                # Generate predictions
-                predictions = train_model(
-                    data,
-                    forecast_days,
-                    'rf' if model_type == 'Random Forest' else 'lr'
-                )
-                
-                # Create forecast dates
+                progress_bar = st.progress(0)
+                for i in range(100):
+                    time.sleep(0.01)
+                    progress_bar.progress(i + 1)
+                predictions = train_model(data, forecast_days, 'rf' if model_type == 'Random Forest' else 'lr')
                 last_date = data.index[-1]
-                forecast_dates = pd.date_range(
-                    start=last_date + timedelta(days=1),
-                    periods=forecast_days,
-                    freq='B'  # Business days
-                )
-                
-                # Display forecast results
-                st.subheader('Price Forecast')
-                forecast_df = pd.DataFrame({
-                    'Date': forecast_dates,
-                    'Predicted Price': predictions
-                })
+                forecast_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_days, freq='B')
+                forecast_df = pd.DataFrame({'Date': forecast_dates, 'Predicted Price': predictions})
                 forecast_df.set_index('Date', inplace=True)
                 st.dataframe(forecast_df)
-                
-                # Get recommendation
-                recommendation, color = get_recommendation(
-                    data['Close'].iloc[-1],
-                    predictions
-                )
-                
-                # Display recommendation
-                st.markdown(f"""
+
+                # Recommendation
+                recommendation, color, explanation = get_recommendation(data['Close'].iloc[-1], predictions)
+                st.markdown(
+                    f"""
                     <div style='
                         padding: 20px;
-                        border-radius: 10px;
+                        border-radius: 12px;
                         background-color: {color};
                         text-align: center;
                         color: white;
                         font-weight: bold;
                         font-size: 24px;
                     '>
-                        Recommendation: {recommendation}
+                        🎯 Recommendation: {recommendation}<br>
+                        <span style='font-size: 16px;'>{explanation}</span>
                     </div>
-                """, unsafe_allow_html=True)
-                
+                    """,
+                    unsafe_allow_html=True,
+                )
+
                 # Plot forecast
                 fig = go.Figure()
-                
-                # Historical prices
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['Close'],
-                    name='Historical Price',
-                    line=dict(color='blue')
-                ))
-                
-                # Forecast
-                fig.add_trace(go.Scatter(
-                    x=forecast_dates,
-                    y=predictions,
-                    name='Forecast',
-                    line=dict(color='red', dash='dash')
-                ))
-                
-                fig.update_layout(
-                    title='Stock Price Forecast',
-                    xaxis_title='Date',
-                    yaxis_title='Price',
-                    template='plotly_white'
-                )
-                
-                st.plotly_chart(fig)
-        
+                fig.add_trace(go.Scatter(x=data.index, y=data['Close'], name='Historical Price', line=dict(color='blue')))
+                fig.add_trace(go.Scatter(x=forecast_dates, y=predictions, name='Forecast', line=dict(color='red', dash='dash')))
+                fig.update_layout(title='Stock Price Forecast', xaxis_title='Date', yaxis_title='Price', template='plotly_dark')
+                st.plotly_chart(fig, use_container_width=True)
+
         # Recent data
-        st.header('Recent Data')
+        st.markdown('## 📅 Recent Data')
         st.dataframe(data.tail())
 
 if __name__ == "__main__":
