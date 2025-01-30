@@ -312,6 +312,34 @@ if st.session_state.data is not None:
             </div>
             """, unsafe_allow_html=True)
             
+            # Predicted Prices Table
+            st.subheader("📈 Predicted Prices")
+            forecast_display = forecast_df.reset_index()
+            forecast_display.columns = ['Date', 'Predicted Price']
+            st.dataframe(
+                forecast_display.style.format({
+                    'Date': lambda x: x.strftime('%Y-%m-%d'),
+                    'Predicted Price': '{:.2f}'
+                }),
+                height=300,
+                use_container_width=True
+            )
+            
+            # Recent Historical Data Table
+            st.subheader("📊 Recent Historical Data")
+            recent_data = df[['Low', 'High', 'Close']].tail(5).reset_index()
+            recent_data.rename(columns={'index': 'Date'}, inplace=True)
+            st.dataframe(
+                recent_data.style.format({
+                    'Date': lambda x: x.strftime('%Y-%m-%d'),
+                    'Low': '{:.2f}',
+                    'High': '{:.2f}',
+                    'Close': '{:.2f}'
+                }),
+                height=300,
+                use_container_width=True
+            )
+            
             # Performance metrics
             st.subheader("⚡ Performance Metrics")
             col1, col2, col3 = st.columns(3)
