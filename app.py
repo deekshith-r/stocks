@@ -285,7 +285,8 @@ if st.session_state.data is not None:
             'Close': '${:.2f}',
             'Volume': '{:,.0f}'
         }).hide(axis='index'),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
 
     # Generate predictions
@@ -348,7 +349,8 @@ if st.session_state.data is not None:
                     'Prediction Date': lambda x: x.strftime('%Y-%m-%d'),
                     'Predicted Price': '${:.2f}'
                 }).hide(axis='index'),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
             
             # Performance metrics
